@@ -83,6 +83,17 @@ int main(int argc, char **argv) {
 	uint8_t *ibase = iorig;
 	assert(ibase);
 
+	int phsize = 0;
+
+	// Support for Nook Tablet, HD, and HD+
+	if (memcmp(ibase + 48, "BauwksBoot", 10) == 0) {
+		phsize = 262144;
+	} else if (memcmp(ibase + 64, "Green Loader", 12) == 0 ||
+			memcmp(ibase + 64, "eMMC boot.img+secondloader", 26) == 0) {
+		phsize = 1048576;
+	}
+	ibase += phsize;
+
 	while(ibase<(iorig+isize)) {
 		if(memcmp(ibase, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
 			break;
@@ -100,11 +111,15 @@ int main(int argc, char **argv) {
 
 	unlink("new-boot.img");
 	int ofd = open("new-boot.img", O_RDWR|O_CREAT, 0644);
-	ftruncate(ofd, ihdr->page_size);
+	if (phsize > 0) {
+		//Write back original preheader
+		write(ofd, iorig, phsize);
+	}
+	ftruncate(ofd, ihdr->page_size + phsize);
 	//Write back original header, we'll change it later
 	write(ofd, ihdr, sizeof(*ihdr));
 
-	struct boot_img_hdr *hdr = mmap(NULL, sizeof(*ihdr), PROT_READ|PROT_WRITE, MAP_SHARED, ofd, 0);
+	struct boot_img_hdr *hdr = mmap(NULL, sizeof(*ihdr), PROT_READ|PROT_WRITE, MAP_SHARED, ofd, phsize);
 	//First set everything to zero, so we know where we are at.
 	hdr->kernel_size = 0;
 	hdr->ramdisk_size = 0;
@@ -112,17 +127,22 @@ int main(int argc, char **argv) {
 	hdr->unused[0] = 0;
 	memset(hdr->id, 0, sizeof(hdr->id)); //Setting id to 0 might be wrong?
 
-	int pos = hdr->page_size;
+	int pos = hdr->page_size + phsize;
+	fprintf(stderr, "pos1: [%d]\n", pos);
 	int size = 0;
 
 	size = append_file(ofd, "kernel", pos);
 	pos += size + hdr->page_size - 1;
+	fprintf(stderr, "posa: [%d]\n", pos);
 	pos &= ~(hdr->page_size-1);
+	fprintf(stderr, "pos2: [%d]\n", pos);
 	hdr->kernel_size = size;
 
 	size = append_ramdisk(ofd, pos);
 	pos += size + hdr->page_size - 1;
+	fprintf(stderr, "posb: [%d]\n", pos);
 	pos &= ~(hdr->page_size-1);
+	fprintf(stderr, "pos3: [%d]\n", pos);
 	hdr->ramdisk_size = size;
 
 	if(access("second", R_OK) == 0) {
@@ -139,6 +159,7 @@ int main(int argc, char **argv) {
 		hdr->unused[0] = size;
 	}
 
+	fprintf(stderr, "posf: [%d]\n", pos);
 	post_process(hdr, ofd, pos);
 	munmap(hdr, sizeof(*ihdr));
 	close(ofd);

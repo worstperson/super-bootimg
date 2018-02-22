@@ -91,6 +91,14 @@ int main(int argc, char **argv) {
 
 	search_security_hdr(base, size);
 
+	// Support for Nook Tablet, HD, and HD+
+	if (memcmp(base + 48, "BauwksBoot", 10) == 0) {
+		base += 262144;
+	} else if (memcmp(base + 64, "Green Loader", 12) == 0 ||
+			memcmp(base + 64, "eMMC boot.img+secondloader", 26) == 0) {
+		base += 1048576;
+	}
+
 	//We're searching for the header in the whole file, we could stop earlier.
 	//At least HTC and nVidia have a signature header
 	while(base<(orig+size)) {
